@@ -1,3 +1,8 @@
+## Live Demo
+
+Try it: https://huggingface.co/spaces/Laiba-Azhar0707/medical-billing-rag
+
+Ask any medical billing question. System retrieves sources and generates grounded answers.
 # RAG System: Medical Billing Knowledge Base
 
 A retrieval-augmented generation system built over 264 medical billing articles. Demonstrates embeddings, vector search, semantic retrieval, and LLM integration.
