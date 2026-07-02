@@ -2,21 +2,24 @@ import requests
 from bs4 import BeautifulSoup
 from readability import Document
 from pathlib import Path
+from urllib.parse import urljoin
 import time
+import logging
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 base_url = "https://credexhealthcare.com"
 docs_path = Path("docs")
 docs_path.mkdir(exist_ok=True)
 
-# You already have 451 article URLs, so let's load them directly
-article_urls = [
-    # Sample of URLs you found in first pass
-    "https://credexhealthcare.com/best-medical-billing-companies-in-florida/",
-    "https://credexhealthcare.com/best-medical-billing-companies-in-texas/",
-    # etc... 
-]
+logger.info("Starting blog page scan...")
 
-print("🔍 Rescanning blog pages for article URLs...")
+# Fetch blog listing pages and collect all article URLs
 article_urls = set()
 page_num = 1
 
@@ -26,9 +29,10 @@ while page_num <= 60:
     else:
         blog_page = f"{base_url}/blogs/?e-page-feaf477={page_num}"
     
-    print(f"   Page {page_num}...", end=" ")
     try:
+        logger.info(f"Scanning page {page_num}...")
         response = requests.get(blog_page, timeout=10)
+        response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         
         page_found = 0
@@ -42,7 +46,7 @@ while page_num <= 60:
                     article_urls.add(href)
                     page_found += 1
         
-        print(f"✓ ({page_found} links)")
+        logger.info(f"  Page {page_num}: Found {page_found} links")
         
         # Stop if no next page indicator
         if 'e-page-feaf477' not in str(soup) or page_num > 59:
@@ -50,15 +54,19 @@ while page_num <= 60:
         
         page_num += 1
         time.sleep(0.5)
+        
+    except requests.RequestException as e:
+        logger.error(f"Request failed on page {page_num}: {e}")
+        break
     except Exception as e:
-        print(f"✗ {e}")
+        logger.error(f"Unexpected error on page {page_num}: {e}")
         break
 
 article_urls = sorted(article_urls)
-print(f"\n✓ Found {len(article_urls)} articles\n")
+logger.info(f"Found {len(article_urls)} unique articles\n")
 
-# Scrape with readability
-print("📄 Scraping with Readability parser...")
+# Scrape each article
+logger.info("Starting article scraping...")
 successful = 0
 failed = 0
 
@@ -69,7 +77,13 @@ for i, url in enumerate(article_urls, 1):
         
         # Use readability to extract article content
         doc = Document(response.text)
-        content = doc.summary()  # Returns clean HTML
+        
+        if not doc or not doc.summary():
+            logger.warning(f"[{i}/{len(article_urls)}] Empty content: {url[:60]}")
+            failed += 1
+            continue
+        
+        content = doc.summary()
         
         # Parse HTML to get text
         soup = BeautifulSoup(content, 'html.parser')
@@ -78,7 +92,7 @@ for i, url in enumerate(article_urls, 1):
         
         # Must have substantial content
         if not text or len(text) < 300:
-            print(f"  [{i}/{len(article_urls)}] ⚠️  Too short: {title[:40]}")
+            logger.warning(f"[{i}/{len(article_urls)}] Too short ({len(text)} chars): {title[:40]}")
             failed += 1
             continue
         
@@ -97,15 +111,23 @@ for i, url in enumerate(article_urls, 1):
         
         filepath.write_text(text, encoding='utf-8')
         
-        print(f"  [{i}/{len(article_urls)}] ✓ {title[:50]}")
+        logger.info(f"[{i}/{len(article_urls)}] ✓ {title[:50]}")
         successful += 1
         time.sleep(0.2)
         
+    except requests.Timeout:
+        logger.error(f"[{i}/{len(article_urls)}] Timeout: {url[:60]}")
+        failed += 1
+    except requests.RequestException as e:
+        logger.error(f"[{i}/{len(article_urls)}] Request failed: {str(e)[:50]}")
+        failed += 1
     except Exception as e:
-        print(f"  [{i}/{len(article_urls)}] ✗ {str(e)[:40]}")
+        logger.error(f"[{i}/{len(article_urls)}] Parsing error: {str(e)[:50]}")
         failed += 1
 
-print(f"\n✅ Complete!")
-print(f"   Saved: {successful} articles")
-print(f"   Failed: {failed} articles")
-print(f"   Location: {docs_path.resolve()}")
+logger.info(f"\n{'='*50}")
+logger.info(f"✅ Complete!")
+logger.info(f"   Saved: {successful} articles")
+logger.info(f"   Failed: {failed} articles")
+logger.info(f"   Location: {docs_path.resolve()}")
+logger.info(f"{'='*50}")
